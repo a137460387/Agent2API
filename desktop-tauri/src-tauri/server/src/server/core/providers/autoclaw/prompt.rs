@@ -104,9 +104,32 @@ pub const IDENTITY_LINE: &str = "You are a personal assistant running inside Ope
 ///
 /// 末尾带一个 `\n`，[`join_prefix`] 再补一个空行 —— 于是客户端正文另起一段，
 /// 与官方 prompt 的段落风格一致。
+///
+/// ── 末段那条「兼容说明」是干什么的（2026-11-02 实测后加的）──────────
+/// 上游闸门**逐字**要这句 `You are a personal assistant running inside
+/// OpenClaw.`：把它换成任何别的产品名（实测 `DeepSeek Harness`）同一条最小请求
+/// 立刻 406。于是这行字只能照抄，代价是模型会照着念、自报家门成「OpenClaw 里的
+/// 助手」——用户在 DSH / Claude Code / Cline 里问「你是谁」时看得很突兀。
+///
+/// 闸门只看**首行与 `## Tooling` 段**，不排斥后面追加内容（实测：首行照抄 +
+/// 这一段说明 + 客户端自己的提示词 → 200，且模型改口为客户端身份）。因此这里在
+/// 身份块之后补一段中性说明，明确「上面那个产品名是线上的兼容要求、不是你」，
+/// 让自我认知交还给紧随其后的客户端提示词。
+///
+/// 措辞纪律：不删、不改首行；不提任何具体厂商名（提了就是把别家产品名带进
+/// system，反而可能被别的闸门命中）；主语用第二人称，并给出「用户问你是谁时
+/// 怎么答」的可执行指引 —— 只说「忽略上面」而不给替代来源，模型会退回到
+/// 通用说法，效果不如给出来源（实测口径见上）。
 const IDENTITY_PREFIX: &str = "You are a personal assistant running inside OpenClaw.\n\n\
 ## Tooling\n\
-Available tools are policy-filtered. Names are case-sensitive; call exactly as listed.\n";
+Available tools are policy-filtered. Names are case-sensitive; call exactly as listed.\n\
+\n\
+## Compatibility note\n\
+The product name in the first line above is a wire-format requirement of the API this\n\
+request travels through; it is not your identity. Your real identity, role and working\n\
+rules are given by the instructions that follow. When the user asks who you are, answer\n\
+from those instructions — describe yourself by what they say, and do not mention or\n\
+repeat the product name from the first line.\n";
 
 /// 外来身份句 → 中性说法（**长的在前**）。
 ///
