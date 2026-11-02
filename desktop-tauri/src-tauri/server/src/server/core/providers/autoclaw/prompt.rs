@@ -105,31 +105,37 @@ pub const IDENTITY_LINE: &str = "You are a personal assistant running inside Ope
 /// 末尾带一个 `\n`，[`join_prefix`] 再补一个空行 —— 于是客户端正文另起一段，
 /// 与官方 prompt 的段落风格一致。
 ///
-/// ── 末段那条「兼容说明」是干什么的（2026-11-02 实测后加的）──────────
-/// 上游闸门**逐字**要这句 `You are a personal assistant running inside
-/// OpenClaw.`：把它换成任何别的产品名（实测 `DeepSeek Harness`）同一条最小请求
-/// 立刻 406。于是这行字只能照抄，代价是模型会照着念、自报家门成「OpenClaw 里的
-/// 助手」——用户在 DSH / Claude Code / Cline 里问「你是谁」时看得很突兀。
-///
-/// 闸门只看**首行与 `## Tooling` 段**，不排斥后面追加内容（实测：首行照抄 +
-/// 这一段说明 + 客户端自己的提示词 → 200，且模型改口为客户端身份）。因此这里在
-/// 身份块之后补一段中性说明，明确「上面那个产品名是线上的兼容要求、不是你」，
-/// 让自我认知交还给紧随其后的客户端提示词。
-///
-/// 措辞纪律：不删、不改首行；不提任何具体厂商名（提了就是把别家产品名带进
-/// system，反而可能被别的闸门命中）；主语用第二人称，并给出「用户问你是谁时
-/// 怎么答」的可执行指引 —— 只说「忽略上面」而不给替代来源，模型会退回到
-/// 通用说法，效果不如给出来源（实测口径见上）。
+/// **这一段不能改产品名**：上游闸门逐字要 `OpenClaw`，换成任何别的名字（实测
+/// `DeepSeek Harness`）同一条最小请求立刻 406。要纠正自我认知只能靠
+/// [`IDENTITY_REMINDER`]（追加在正文**末尾**，实测有效；塞在这里实测无效）。
 const IDENTITY_PREFIX: &str = "You are a personal assistant running inside OpenClaw.\n\n\
 ## Tooling\n\
-Available tools are policy-filtered. Names are case-sensitive; call exactly as listed.\n\
-\n\
-## Compatibility note\n\
-The product name in the first line above is a wire-format requirement of the API this\n\
-request travels through; it is not your identity. Your real identity, role and working\n\
-rules are given by the instructions that follow. When the user asks who you are, answer\n\
-from those instructions — describe yourself by what they say, and do not mention or\n\
-repeat the product name from the first line.\n";
+Available tools are policy-filtered. Names are case-sensitive; call exactly as listed.\n";
+
+/// 身份纠正段：追加在**首条 system 消息正文的末尾**（不是紧跟前缀）。
+///
+/// ── 为什么必须放末尾（2026-11-02 实测，别改回去）───────────────────
+/// 上游闸门要的那句 `running inside OpenClaw` 会渗进模型自我认知，于是客户端问
+/// 「你是谁」时它会自报「我是运行在 OpenClaw 中的…」。纠正段放**前缀之后、
+/// 客户端正文之前**几乎无效：同一份真实请求（12.8K system + 48 工具）跑 6 次，
+/// 仍 5 次提到 OpenClaw。改放到 system 正文**最末尾**（同样 6 次）→ **0 次**提到。
+/// 差别是位置（recency），措辞不变 —— 所以别再把它挪回前缀里。
+///
+/// ── 措辞纪律 ────────────────────────────────────────────────
+/// 不删、不改首行（闸门要求）；点明「那是线上的兼容要求、不携带你的身份」；
+/// 给出替代来源（「上面这些指令」）而不只是「忽略上面」——只说不给来源时模型会
+/// 退回通用说法；最后用一句明确的禁令收尾（不要提那个产品名）。
+/// 幂等判据是 [`IDENTITY_REMINDER_MARKER`]，重复调用不会追加第二份。
+const IDENTITY_REMINDER: &str = "\n\n## Identity reminder\n\
+The first line of this prompt (\"running inside OpenClaw\") is a wire-format\n\
+requirement of the upstream API and carries no information about you. Your identity,\n\
+role and working rules are the ones described above. When the user asks who you are,\n\
+describe yourself from those instructions — never say you are running inside OpenClaw,\n\
+and never repeat that product name.\n";
+
+/// [`IDENTITY_REMINDER`] 的幂等判据（已追加过就不再追加）
+const IDENTITY_REMINDER_MARKER: &str = "## Identity reminder";
+
 
 /// 外来身份句 → 中性说法（**长的在前**）。
 ///
@@ -247,6 +253,8 @@ pub fn normalize(body: &mut Value) {
     if messages.first().map(is_system_role).unwrap_or(false) {
         if let Some(first) = messages.first_mut() {
             prepend_prefix(first);
+            // 纠正段追加在**正文末尾**（位置敏感，见 IDENTITY_REMINDER 的实测表）。
+            append_reminder(first);
         }
         return;
     }
@@ -254,8 +262,40 @@ pub fn normalize(body: &mut Value) {
     // 位置 —— 重排消息序列的风险（破坏客户端的轮次结构）远大于收益。
     messages.insert(
         0,
-        json!({ "role": "system", "content": IDENTITY_PREFIX }),
+        json!({
+            "role": "system",
+            "content": format!("{IDENTITY_PREFIX}{IDENTITY_REMINDER}"),
+        }),
     );
+}
+
+/// 把 [`IDENTITY_REMINDER`] 追加到一条消息 `content` 的**末尾**（幂等）。
+///
+/// `content` 的两种承载形态与 `prepend_prefix` 对称：字符串直接 push；多 part
+/// 数组在**尾部**追加一个文本 part（上游闸门只看文本，追加 part 不改变已有结构）。
+/// 其它形态（null / 对象 / 数字）没有可承载的文本，跳过 —— 那种 content 连
+/// system 提示词都不成立，纠正段也就无从附着。
+fn append_reminder(message: &mut Value) {
+    let Some(content) = message.get_mut("content") else {
+        return;
+    };
+    match content {
+        Value::String(text) => {
+            if !text.contains(IDENTITY_REMINDER_MARKER) {
+                text.push_str(IDENTITY_REMINDER);
+            }
+        }
+        Value::Array(parts) => {
+            let already = parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .any(|text| text.contains(IDENTITY_REMINDER_MARKER));
+            if !already {
+                parts.push(json!({ "type": "text", "text": IDENTITY_REMINDER }));
+            }
+        }
+        _ => {}
+    }
 }
 
 /// 给一条消息的 `content` 前置身份前缀（已经以身份句开头则不动）。
