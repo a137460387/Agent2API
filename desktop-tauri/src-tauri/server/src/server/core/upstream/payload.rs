@@ -233,8 +233,13 @@ pub(super) fn send_body<'a>(
             );
             Cow::Owned(next)
         }
-        // passthrough 且未降级：一个字节都不动（默认路径，零拷贝沿用客户端原始体）
-        None => Cow::Borrowed(ctx.body),
+        // passthrough 且未降级：提示词层一个字节都不动 —— 但**角色归一层的结果
+        // 必须保住**：`role_base` 在归一命中时是 Owned 的新体（developer → system），
+        // 退回 `ctx.body` 会把那次改写整个丢掉。实测（v3.0.8）：passthrough 下
+        // 发 developer 角色请求，日志里「角色归一层：developer → system × 1 条」
+        // 照常打印，上游收到的却仍是 `role:"developer"` —— AutoClaw 一律 406。
+        // 归一层写了、日志也报了，只有结果没人用。
+        None => role_base,
     };
     // ── ② 指纹脱敏层（核心规则见 `core::sanitize`）─────────────────────
     let body = match ctx.sanitize_fingerprints {

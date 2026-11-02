@@ -153,6 +153,20 @@ const FOREIGN_IDENTITIES: &[(&str, &str)] = &[
         "You are an AI agent powered by DeepSeek Harness",
         "You are an AI agent powered by a local coding harness",
     ),
+    // DSH 0.2.x 的首句（实测 2026-11-02，国内版）：`You are a coding agent powered
+    // by the <model> model.` —— 逐字命中断言拦截，406 空响应体。边界实测（同一
+    // 账号同一模型，只改 system 一句）：
+    //   `You are a coding agent powered by the glm-`             → 406
+    //   `coding agent powered by the glm-`（去掉 You are a）      → 200
+    //   `You are an agent powered by the glm-5.3 model.`（a→an）  → 200
+    //   `You are a coding agent running on the glm-5.3 model.`   → 200
+    // 可见指纹就是 `You are a coding agent powered by` 这一段，因此只把
+    // `powered by` 换成 `running on`（产品名/模型名原样保留，语义无损）。
+    // 这一条必须排在下面那条最通用的 `You are Codex` 之前（长在前是本表纪律）。
+    (
+        "You are a coding agent powered by",
+        "You are a coding agent running on",
+    ),
     // 放最后：它最短、最通用（新版 Codex 的首句就是它），必须让上面那些更长的
     // Codex CLI 句式先有机会命中（长在前是本表的固定纪律）。
     ("You are Codex", "You are a coding agent"),
