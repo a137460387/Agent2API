@@ -394,6 +394,13 @@ pub async fn dispatch(
         }
         // 账号级活跃连接数（账号页「连接数」列；见 `core::upstream::connections`）
         ("GET", "connections") => return account_connections(&state),
+        // 邀请概览（只读）：`?id=` 指名账号，转成插件的 `invite.summary` 管理动作。
+        ("GET", "invite") => return super::accounts_invite::account_invite(&state, query).await,
+        // 填写邀请码（**写操作、不可撤销**）：`{id, inviteCode}`。与上一条分开
+        // 挂是刻意的 —— 让「刷新页面」不可能误触这个写操作。
+        ("POST", "invite/activate") => {
+            return super::accounts_invite_activate::account_invite_activate(&state, body).await
+        }
         ("POST", "checkin") => return accounts_checkin(&state, body).await,
         _ => {}
     }

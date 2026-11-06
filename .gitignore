@@ -10,6 +10,10 @@ desktop-tauri/target/
 # cargo 编译产物（src-tauri/.cargo/config.toml 把 target-dir 指到了项目根）
 /target/
 
+# 本地联调补丁：把协议库 patch 到本机插件仓库 checkout。
+# **不能提交** —— 提交后「干净 clone 的构建」会依赖某个人的磁盘布局。
+/.cargo/config.toml
+
 # 本地开发过程产物
 .zcode/
 .verify/

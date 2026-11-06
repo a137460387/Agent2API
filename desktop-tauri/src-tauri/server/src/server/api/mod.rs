@@ -39,6 +39,9 @@ pub mod agent_resources;
 pub mod accounts;
 pub mod accounts_batch;
 mod accounts_export;
+// 邀请概览 `GET /api/accounts/invite?id=`（只读转发插件的 invite.summary）
+mod accounts_invite;
+mod accounts_invite_activate;
 mod accounts_sort;
 // `/api/accounts/usage` 的查询与结果组装（从 accounts.rs 拆出：余额能力从
 // 「只服务 workbuddy」扩到四家混查时新增，见该文件模块头）
