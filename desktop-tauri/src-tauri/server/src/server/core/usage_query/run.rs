@@ -121,6 +121,14 @@ fn commit(store: &AccountStore, job: &Arc<jobs::Job>, mut row: Value) {
                 record.set_updated_at(logging::now_ms());
                 disabled = store.with_conn(&guard, |conn| sql::update_in_place(conn, &record)).is_ok();
             }
+        } else if record.provider() == "accio-cn" && record.enabled()
+            && outcome.error.as_deref().is_some_and(|error| !error.is_empty()) {
+            // Accio 国内版（accio-cn）：余额查询一旦失败（红字），运营口径视为号已废、
+            // 不再恢复，且不希望它继续占着队列。这里把**任何**失败（含网络 / 超时 /
+            // 续期失效等）一律自动禁用，开关保留但退出转发，需手动重新启用。
+            record.set("enabled", json!(false));
+            record.set_updated_at(logging::now_ms());
+            disabled = store.with_conn(&guard, |conn| sql::update_in_place(conn, &record)).is_ok();
         }
         let saved = usage_records::load(&job.id);
         row["at"] = json!(saved.last_attempt_at);
