@@ -48,7 +48,7 @@ pub use diagnostic::LoginDiagnostic;
 pub(crate) use diagnostic::fail_with_error as fail_plugin_login_with_error;
 
 /// 登录总超时（桌面端 SIGN_IN_PENDING_TIMEOUT；轮询型插件登录也用它）
-pub const LOGIN_TIMEOUT_MS: u64 = 5 * 60 * 1000;
+pub const LOGIN_TIMEOUT_MS: u64 = 15 * 60 * 1000;
 /// `/start` 等 authUrl 的上限（对应 server.mjs 的 `Date.now() + 15000`）
 pub const AUTH_URL_WAIT_MS: u64 = 15_000;
 /// 任务完成后在表里保留 10 分钟（Node 版 setTimeout 同值）
