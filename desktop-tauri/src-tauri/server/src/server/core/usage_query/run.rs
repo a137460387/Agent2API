@@ -125,7 +125,20 @@ fn commit(store: &AccountStore, job: &Arc<jobs::Job>, mut row: Value) {
             row["code"] = json!("usage_storage_failed");
         } else if outcome.usage.is_some() && record.enabled() {
             let public = store.public_account(&record);
-            let hit = if public.get("limiterGroups").is_some() {
+            let hit = if record.provider() == "accio-cn" {
+                // Accio 国内版：额度读数里没有 totalLeft / available，上面的阈值口径不适用。
+                // 按运营口径只看「推荐积分」（quotaSources 里 id=referral 的池）——
+                // 剩余 0 即视为这档额度耗尽、号不再可用，自动禁用。读不出 referral 读数
+                // 时不猜、不命中（保持现状）。
+                let referral_remaining = outcome.usage.as_ref().and_then(|usage| {
+                    usage.get("quotaSources").and_then(Value::as_array).and_then(|sources| {
+                        sources.iter().find(|source| source.get("id").and_then(Value::as_str) == Some("referral"))
+                            .and_then(|source| source.get("remaining")).and_then(Value::as_f64)
+                            .filter(|remaining| remaining.is_finite())
+                    })
+                });
+                referral_remaining.is_some_and(|remaining| remaining <= 0.0)
+            } else if public.get("limiterGroups").is_some() {
                 limiter::evaluate::disable_hit(&public, &limiter::sources::facts(), &limiter::counter::facts(), logging::now_ms())
             } else {
                 usage_records::low_balance_disable_threshold(&public).zip(outcome.usage.as_ref()
